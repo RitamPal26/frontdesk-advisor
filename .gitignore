@@ -1,0 +1,20 @@
+# Environment variables
+.env
+.env.*
+
+# Python virtual environment
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Node.js dependencies
+node_modules/
+
+# Build artifacts
+build/
+dist/
+
+# IDE files
+.vscode/
+.idea/
