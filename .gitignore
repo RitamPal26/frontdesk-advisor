@@ -19,5 +19,6 @@ dist/
 .vscode/
 .idea/
 
-# Firebase Service Account Key (CRITICAL)
+# Firebase 
 serviceAccountKey.json
+firebase-debug.log
