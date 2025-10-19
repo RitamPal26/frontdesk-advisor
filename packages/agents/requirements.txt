@@ -1,1 +1,3 @@
 firebase-admin
+livekit-agents[silero,turn-detector]
+python-dotenv
