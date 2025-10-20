@@ -1,61 +1,124 @@
 import os
+import re
 import firebase_admin
 from firebase_admin import credentials, firestore
 import datetime
-import time
-from livekit_integration import LiveKitAgentServer
+from livekit_integration import LiveKitAgentServer # Assuming this file exists and is set up
+
+# --- Common Stop Words (must be identical to the populator script) ---
+STOP_WORDS = set([
+    "a", "an", "the", "is", "are", "was", "were", "be", "being", "been",
+    "of", "at", "in", "on", "to", "for", "with", "about", "by", "do", "you"
+])
 
 # --- Initialization ---
-os.environ['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080'
-cred = credentials.Certificate("serviceAccountKey.json") 
-firebase_admin.initialize_app(cred)
+try:
+    cred = credentials.Certificate("serviceAccountKey.json")
+    firebase_admin.initialize_app(cred)
+except FileNotFoundError:
+    print("❌ Error: serviceAccountKey.json not found.")
+    exit()
+
 db = firestore.client()
 
-if os.getenv('USE_EMULATOR', 'true') == 'true':
-    os.environ['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080'
-    print("Connected to Firestore Emulator")
+# --- Connect to Emulator ---
+os.environ['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080'
+print("🔌 Connected to Firestore Emulator at localhost:8080")
 
+def generate_keywords(text: str) -> list[str]:
+    """
+    Processes a text string to extract keywords. This MUST be identical
+    to the function in the populate_db.py script.
+    """
+    text = re.sub(r'[^\w\s]', '', text.lower())
+    keywords = [word for word in text.split() if word not in STOP_WORDS and len(word) > 2]
+    return list(set(keywords))
 
-def handle_incoming_question(question_text):
+def handle_incoming_question(question_text: str):
+    """
+    Receives a question, searches the knowledge base using keywords,
+    and decides on a response or escalation.
+    """
     print(f"\n📞 Incoming question: '{question_text}'")
     
-    knowledge_base_ref = db.collection('knowledge_base')
-    query = knowledge_base_ref.where('question', '==', question_text).limit(1)
-    results = list(query.stream())
-
-    if len(results) > 0:
-        learned_answer = results[0].to_dict().get('answer')
-        print(f"🤖 AI Response (from knowledge base): '{learned_answer}'")
-        return
-
-    print("🤖 AI Response: 'I don't know that one. Let me check with my supervisor...'")
+    # 1. Generate keywords from the user's question
+    search_keywords = generate_keywords(question_text)
+    print(f"   -> Searching with keywords: {search_keywords}")
     
+    if not search_keywords:
+        print("🤖 AI Response: 'I'm sorry, I didn't understand the question. Could you rephrase?'")
+        return # Or escalate
+
+    # 2. Query Firestore for documents matching any of the keywords
+    knowledge_base_ref = db.collection('knowledge_base')
+    query = knowledge_base_ref.where('question_keywords', 'array-contains-any', search_keywords)
+    results = list(query.stream())
+    
+    # 3. Score and find the best match
+    best_match = None
+    highest_score = 0
+    
+    for doc in results:
+        doc_data = doc.to_dict()
+        doc_keywords = doc_data.get('question_keywords', [])
+        # Score is the number of matching keywords
+        score = len(set(search_keywords) & set(doc_keywords))
+        
+        if score > highest_score:
+            highest_score = score
+            best_match = doc_data
+
+    # 4. Implement the confidence logic
+    # Confidence is the ratio of matched keywords to search keywords
+    confidence = highest_score / len(search_keywords) if search_keywords else 0
+    print(f"   -> Best match found with confidence: {confidence:.2f}")
+
+    if confidence > 0.6: # High confidence threshold
+        answer = best_match.get('answer_text', "I found an answer but could not retrieve it.")
+        print(f"🤖 AI Response (from knowledge base): '{answer}'")
+        # Here you would send the answer back to the user via LiveKit
+        return answer
+    
+    # Low confidence -> Escalate to human
+    print("🤖 AI Response: 'I'm not sure about that. Let me check with my supervisor...'")
+    create_help_request(question_text)
+    return "Let me check with my supervisor."
+
+
+def create_help_request(question_text):
+    """Creates a help request document in Firestore."""
     help_request = {
         'customer_id': 'simulated_customer_123',
         'question_text': question_text,
-        'status': 'Pending',
-        'received_at': datetime.datetime.now(datetime.timezone.utc)
+        'status': 'pending', # Status can be: pending, assigned, resolved
+        'created_at': datetime.datetime.now(datetime.timezone.utc),
+        'version': 1,
+        'schema_version': 1
     }
-
     try:
-        update_time, doc_ref = db.collection('help_requests').add(help_request)
+        _, doc_ref = db.collection('help_requests').add(help_request)
         print(f"📝 Successfully created help request with ID: {doc_ref.id}")
     except Exception as e:
         print(f"❌ An error occurred while creating help request: {e}")
 
 async def main():
-    # Create an instance of our server, passing our business logic function as the callback
+    """Starts the LiveKit Agent Server."""
+    print("\n🚀 Starting LiveKit Agent Server...")
+    # Create an instance of our server, passing our business logic function
     server = LiveKitAgentServer(on_question_received=handle_incoming_question)
-    
-    # Start the server
     await server.start()
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
+    import asyncio
+    # To test the function directly, you can uncomment these lines:
+    # print("--- Direct Test Run ---")
+    # handle_incoming_question("what time does the saloon open")
+    # handle_incoming_question("do you do hair coloring")
+    # handle_incoming_question("what is the price of a cut")
+    # print("-----------------------\n")
+    
+    # The main purpose is to run the server
     try:
-        handle_incoming_question("Do you offer student discounts?")
-        time.sleep(2)
-        handle_incoming_question("Do you do color treatments?")
-    finally:
-        # Close the Firestore client connection
-        db.close()
-        print("\n✅ Closed Firestore connection")
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n shutting down server.")
