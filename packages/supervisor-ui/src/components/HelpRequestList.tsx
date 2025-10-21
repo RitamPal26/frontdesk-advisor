@@ -19,7 +19,6 @@ export default function HelpRequestList() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Listener for PENDING requests
     const pendingQuery = query(
       collection(db, "help_requests"),
       where("status", "==", "pending")
@@ -33,7 +32,6 @@ export default function HelpRequestList() {
       setLoading(false);
     });
 
-    // Listener for RESOLVED requests
     const resolvedQuery = query(
       collection(db, "help_requests"),
       where("status", "==", "Resolved")

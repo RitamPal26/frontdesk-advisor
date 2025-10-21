@@ -35,7 +35,7 @@ const generateKeywords = (question: string): string[] => {
   ]);
   return question
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "") // Remove punctuation
+    .replace(/[^a-z0-9\s]/g, "") 
     .split(/\s+/)
     .filter((word) => word && !stopWords.has(word));
 };
