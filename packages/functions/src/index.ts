@@ -31,8 +31,8 @@ export const onHelpRequestResolved = onDocumentUpdated(
       // 2. Update the internal knowledge base
       try {
         await db.collection("knowledge_base").add({
-          question: question,
-          answer: answer,
+          question_text: question_text,
+          answer_text: answer_text,
           learned_at: new Date(),
         });
         logger.log("Successfully updated the knowledge base.");
