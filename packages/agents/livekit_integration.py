@@ -1,61 +1,86 @@
 import os
+import asyncio
+from datetime import datetime, timezone
 import firebase_admin
 from firebase_admin import credentials, firestore
-from datetime import datetime, timezone
-
 from dotenv import load_dotenv
+
 from livekit import agents
 from livekit.agents import AgentSession, Agent, RoomInputOptions
-from livekit.plugins import silero, noise_cancellation
+from livekit.plugins import (
+    openai,
+    cartesia,
+    deepgram,
+    noise_cancellation,
+    silero,
+)
+from livekit.plugins import openai
+from livekit.plugins.turn_detector.english import EnglishModel
+from livekit.agents import AgentSession
 
 load_dotenv(".env.local")
 
-# FB: 1. --- Initialize Firebase Admin SDK ---
-try:
-    # Ensure serviceAccountKey.json is in your project directory
-    if not firebase_admin._apps:
-        cred = credentials.Certificate("serviceAccountKey.json")
-        firebase_admin.initialize_app(cred)
-        print("✅ Firebase App initialized.")
-except Exception as e:
-    print(f"❌ Error initializing Firebase App: {e}")
-    exit()
+# --- Initialization ---
 
+os.environ['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080'
+cred = credentials.Certificate("serviceAccountKey.json") 
+firebase_admin.initialize_app(cred)
 db = firestore.client()
-
-# FB: 2. --- Connect to Local Emulators ---
-if os.environ.get('USE_FIREBASE_EMULATOR'):
-    print("🔌 Connecting to Firebase Emulator...")
+if os.getenv('USE_EMULATOR', 'true') == 'true':
     os.environ['FIRESTORE_EMULATOR_HOST'] = 'localhost:8080'
-    print("🔌 Connected to Firestore Emulator at localhost:8080")
+    print("Connected to Firestore Emulator")
 
 
-class FrontdeskAgent(Agent):
-    def __init__(self, db_client, instructions: str):
+# ENHANCED: --- This is now your powerful Frontdesk Agent ---
+class Assistant(Agent):
+    def __init__(self, db_client, instructions: str) -> None:
         super().__init__(instructions=instructions)
-        self.db = db_client
+        self.db = db_client # ADDED: Store the database client
 
+    # ADDED: The core logic for escalating to a supervisor
     def create_help_request(self, customer_id: str, question: str):
         print(f"✍️ Escalating question to supervisor: '{question}'")
         try:
-            help_requests_ref = self.db.collection('help_requests')
-            help_requests_ref.add({
+            self.db.collection('help_requests').add({
                 'customer_id': customer_id,
                 'question_text': question,
                 'status': 'Pending',
                 'received_at': datetime.now(timezone.utc),
-                'resolved_at': None,
-                'supervisor_response': '',
-                'addedToKnowledgeBase': False,
             })
             print("✅ Help request created in Firestore.")
             return "Let me check with my supervisor and get back to you shortly."
         except Exception as e:
             print(f"❌ Error creating help request: {e}")
-            return "I'm having trouble connecting to my system right now, please call back later."
+            return "I'm having some trouble right now, please call back later."
+
+    # ADDED: This method will contain the main conversation loop
+    async def start(self, session: AgentSession):
+        # Start listening to transcriptions from the user
+        async for text in session.stt.stream():
+            print(f"User said: {text}")
+
+            # Get the LLM's response based on our dynamic instructions
+            llm_stream = await session.llm.chat(text, instructions=self.instructions)
+
+            response_text = ""
+            async for chunk in llm_stream:
+                response_text += chunk.text
+                
+            print(f"LLM RAW TEXT: '[{response_text.strip()}]'")
+
+            # Check for our special escalation keyword
+            if "Please hold on while I get my supervisor" in response_text:
+                escalation_message = self.create_help_request(
+                    customer_id="live_customer_123", # You can make this dynamic later
+                    question=text
+                )
+                await session.say(escalation_message)
+            else:
+                await session.say(response_text)
+
 
 async def entrypoint(ctx: agents.JobContext):
-    # --- 1. Fetch Knowledge Base ---
+    # ENHANCED: --- Fetch Knowledge Base before starting ---
     knowledge_base_str = ""
     try:
         print("📚 Fetching knowledge base from Firestore...")
@@ -71,60 +96,49 @@ async def entrypoint(ctx: agents.JobContext):
         print(f"❌ Error fetching knowledge base: {e}")
         knowledge_base_str = "Error fetching knowledge base."
 
-    # --- 2. Construct Dynamic Prompt ---
+    # ENHANCED: --- Construct the Dynamic Prompt ---
     dynamic_instructions = f"""
-    You are a friendly and helpful customer service agent for COLORS Hair Salon. Your primary goal is to answer customer questions accurately based ONLY on the information provided below.
+    You are a friendly and helpful customer service agent for COLORS HAIR SALON. Greet the customer with a warm welcome and ask how you can assist them today.
+    Your primary goal is to answer questions based ONLY on the information provided below.
 
     --- KNOWLEDGE BASE ---
     {knowledge_base_str}
     --- END KNOWLEDGE BASE ---
 
     Follow these rules STRICTLY:
-    1. Check the Knowledge Base: Before answering, review the information provided above.
-    2. Answer if Known: If the user's question can be answered using the knowledge base, provide the answer in a friendly tone.
-    3. Escalate if Unknown: If the user's question CANNOT be answered from the knowledge base, or if you are unsure, you MUST respond with ONLY the exact phrase: NEEDS_SUPERVISOR
-    4. Do Not Guess: Never make up answers or use information from outside the provided knowledge base. If it's not written above, you don't know it.
+    1. Answer if Known: If the user's question can be answered using the knowledge base, provide the answer.
+    2. Escalate if Unknown: If the question CANNOT be answered, you MUST respond with ONLY the exact phrase: Please hold on while I get my supervisor.
+    3. Do Not Guess: Never make up answers or use external information.
     """
-    
+
     session = AgentSession(
-        stt="assemblyai/universal-streaming:en",
-        llm="openai/gpt-4.1-mini",
-        tts="cartesia/sonic-2",
+        llm=openai.LLM.with_cerebras(
+        model="llama-3.3-70b",
+        ),
+        stt=deepgram.STT(model="nova-2", language="en"),
+        tts=cartesia.TTS(model="sonic-2", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"),
         vad=silero.VAD.load(),
+        turn_detection=EnglishModel(),
     )
     
-    # The agent is initialized with our detailed instructions here
-    agent = FrontdeskAgent(db_client=db, instructions=dynamic_instructions)
-    
+    # ENHANCED: Initialize our agent with the db client and dynamic instructions
+    agent = Assistant(db_client=db, instructions=dynamic_instructions)
+
+    # The start method of our agent will be called here, starting the main loop
     await session.start(
         room=ctx.room,
         agent=agent,
         room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVC(),
+            noise_cancellation=noise_cancellation.BVC(), 
         ),
     )
-    
-    # --- Main interaction loop (simplified example) ---
-    customer_question = "When is the salon open?"
-    
-    # FIXED: The chat() method takes the user's message as the main argument.
-    # The instructions we set when creating the agent are used automatically.
-    llm_stream = session.llm.chat(customer_question)
 
-    ai_response_text = ""
-    async for chunk in llm_stream:
-        ai_response_text += chunk.text
+    # You can remove the old greeting, as the agent now waits for the user to speak first
+    # await session.generate_reply( ... )
 
-    # Now, check the complete text response
-    if "NEEDS_SUPERVISOR" in ai_response_text:
-        response_to_customer = agent.create_help_request(
-            customer_id="simulated_customer_789",
-            question=customer_question
-        )
-        await session.say(response_to_customer)
-    else:
-        await session.say(ai_response_text)
+    # The agent's `start` method will keep running, so we just wait
+    await asyncio.sleep(3600) # Keep the agent alive for an hour, for example
+
 
 if __name__ == "__main__":
-    os.environ['USE_FIREBASE_EMULATOR'] = 'true'
     agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))

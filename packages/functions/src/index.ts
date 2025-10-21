@@ -20,12 +20,12 @@ export const onHelpRequestResolved = onDocumentUpdated(
       logger.log(`Help request ${requestId} was resolved.`);
 
       const customerId = afterData.customer_id;
-      const question = afterData.question_text;
-      const answer = afterData.supervisor_response;
+      const question_text = afterData.question_text;
+      const answer_text = afterData.supervisor_response;
 
       // 1. Simulate texting back the original caller
       logger.log(
-        `Simulating text back to ${customerId}: "Regarding your question '${question}', the answer is: ${answer}"`
+        `Simulating text back to ${customerId}: "Regarding your question '${question_text}', the answer is: ${answer_text}"`
       );
 
       // 2. Update the internal knowledge base
