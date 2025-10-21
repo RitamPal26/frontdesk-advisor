@@ -3,67 +3,130 @@
 
 import { useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, updateDoc } from "firebase/firestore";
+import {
+  doc,
+  updateDoc,
+  addDoc,
+  collection,
+  serverTimestamp,
+} from "firebase/firestore";
 
-// Reuse the interface, or define it again if needed
 interface HelpRequest {
   id: string;
   question_text: string;
   status: string;
+  supervisor_response?: string;
 }
 
-export default function RequestItem({ request }: { request: HelpRequest }) {
-  const [responseText, setResponseText] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+interface RequestItemProps {
+  request: HelpRequest;
+}
 
-  const handleResolve = async () => {
-    if (!responseText.trim()) {
-      alert("Please enter a response.");
+const generateKeywords = (question: string): string[] => {
+  const stopWords = new Set([
+    "is",
+    "a",
+    "the",
+    "what",
+    "how",
+    "for",
+    "of",
+    "a",
+  ]);
+  return question
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "") // Remove punctuation
+    .split(/\s+/)
+    .filter((word) => word && !stopWords.has(word));
+};
+
+export default function RequestItem({ request }: RequestItemProps) {
+  const [answer, setAnswer] = useState("");
+  const [category, setCategory] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!answer.trim() || !category.trim()) {
+      alert("Please provide both an answer and a category.");
       return;
     }
-    setIsSubmitting(true);
-
-    // Get a reference to the specific document in Firestore
-    const requestDocRef = doc(db, "help_requests", request.id);
 
     try {
-      // Update the document with the new status and response
-      await updateDoc(requestDocRef, {
+      const requestRef = doc(db, "help_requests", request.id);
+      await updateDoc(requestRef, {
         status: "Resolved",
-        supervisor_response: responseText,
-        resolved_at: new Date(), // Add a resolved timestamp
+        supervisor_response: answer,
+        resolved_at: serverTimestamp(),
       });
-      // The item will disappear from the list automatically thanks to the real-time listener!
+
+      await addDoc(collection(db, "knowledge_base"), {
+        question_text: request.question_text,
+        answer_text: answer,
+        category: category,
+        question_keywords: generateKeywords(request.question_text),
+        created_at: serverTimestamp(),
+        flagged_for_review: false,
+        schema_version: 2,
+        usage_count: 0,
+      });
+
+      setAnswer("");
+      setCategory("");
     } catch (error) {
-      console.error("Error resolving request:", error);
-      alert("Failed to resolve request. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+      console.error("Error processing request: ", error);
+      alert("Failed to resolve request.");
     }
   };
 
+  if (request.status === "Resolved") {
+    return (
+      <li className="p-4 border rounded-lg shadow-sm bg-gray-800 text-white">
+        <div className="mb-2">
+          <p className="font-semibold text-gray-400">Question:</p>
+          <p>{request.question_text}</p>
+        </div>
+        <div>
+          <p className="font-semibold text-gray-400">Answer:</p>
+          <p className="text-green-400">{request.supervisor_response}</p>
+        </div>
+      </li>
+    );
+  }
+
   return (
-    <li className="p-4 border rounded-lg shadow-sm bg-gray-800 space-y-3">
-      <div>
-        <p className="font-semibold text-gray-300">Question:</p>
-        <p className="text-gray-400">{request.question_text}</p>
-      </div>
-      <div>
-        <textarea
-          value={responseText}
-          onChange={(e) => setResponseText(e.target.value)}
-          placeholder="Type your answer here..."
-          className="w-full p-2 border rounded bg-gray-700 text-white border-gray-600 focus:ring-blue-500 focus:border-blue-500"
-          rows={2}
-        />
-      </div>
-      <button
-        onClick={handleResolve}
-        disabled={isSubmitting}
-        className="w-full px-4 py-2 font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-500"
-      >
-        {isSubmitting ? "Submitting..." : "Submit Answer & Resolve"}
-      </button>
+    <li className="p-4 border rounded-lg shadow-sm bg-gray-800">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block mb-2 font-medium">Question:</label>
+          <p className="p-3 rounded-md bg-gray-700">{request.question_text}</p>
+        </div>
+        <div>
+          <textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Type your answer here..."
+            className="w-full p-2 border rounded-md bg-gray-700 border-gray-600 focus:ring-blue-500 focus:border-blue-500"
+            rows={3}
+            required
+          />
+        </div>
+        <div>
+          <input
+            type="text"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="Enter a category (e.g., Pricing, Services)"
+            className="w-full p-2 border rounded-md bg-gray-700 border-gray-600 focus:ring-blue-500 focus:border-blue-500"
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="w-full px-4 py-2 font-bold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          Submit Answer & Add to Knowledge Base
+        </button>
+      </form>
     </li>
   );
 }

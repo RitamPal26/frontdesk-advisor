@@ -3,7 +3,7 @@ import re
 import firebase_admin
 from firebase_admin import credentials, firestore
 import datetime
-from livekit_integration import LiveKitAgentServer # Assuming this file exists and is set up
+from livekit_integration import LiveKitAgentServer 
 
 # --- Common Stop Words (must be identical to the populator script) ---
 STOP_WORDS = set([
@@ -49,12 +49,10 @@ def handle_incoming_question(question_text: str):
         print("🤖 AI Response: 'I'm sorry, I didn't understand the question. Could you rephrase?'")
         return # Or escalate
 
-    # 2. Query Firestore for documents matching any of the keywords
     knowledge_base_ref = db.collection('knowledge_base')
     query = knowledge_base_ref.where('question_keywords', 'array-contains-any', search_keywords)
     results = list(query.stream())
     
-    # 3. Score and find the best match
     best_match = None
     highest_score = 0
     
@@ -68,7 +66,6 @@ def handle_incoming_question(question_text: str):
             highest_score = score
             best_match = doc_data
 
-    # 4. Implement the confidence logic
     # Confidence is the ratio of matched keywords to search keywords
     confidence = highest_score / len(search_keywords) if search_keywords else 0
     print(f"   -> Best match found with confidence: {confidence:.2f}")
@@ -110,14 +107,6 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    # To test the function directly, you can uncomment these lines:
-    # print("--- Direct Test Run ---")
-    # handle_incoming_question("what time does the saloon open")
-    # handle_incoming_question("do you do hair coloring")
-    # handle_incoming_question("what is the price of a cut")
-    # print("-----------------------\n")
-    
-    # The main purpose is to run the server
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
