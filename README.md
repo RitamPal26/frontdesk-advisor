@@ -97,7 +97,7 @@ NEXT_PUBLIC_LIVEKIT_URL=wss://your-project.livekit.cloud
 uv run livekit_integration.py dev
 ```
 
-Based on the Firebase documentation, here are the necessary changes for your functions setup section:[1][2][3]
+Based on the Firebase documentation, here are the necessary changes for your functions setup section:
 
 ### 3. Setup Functions (Firebase Emulator & Firestore)
 
@@ -112,7 +112,7 @@ cd ../functions
 ```bash
 firebase login
 
-firebase init
+firebase init emulators
 # Select: Firestore, Functions, Emulators
 # Choose existing project or create new one
 
@@ -122,48 +122,15 @@ firebase init
 "Do you want to install dependencies with npm now?": Yes (Y). 
 ```
 
-**Configure Firebase emulator:**
-
-Ensure your `firebase.json` includes emulator configuration:
-
-```json
-{
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "default",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "*.local"
-      ],
-      "predeploy": [
-        "npm --prefix \"$RESOURCE_DIR\" run lint",
-        "npm --prefix \"$RESOURCE_DIR\" run build"
-      ]
-    }
-  ],
-  "emulators": {
-    "functions": {
-      "port": 5001
-    },
-    "firestore": {
-      "port": 8080
-    },
-    "ui": {
-      "enabled": true,
-      "port": 4000
-    },
-    "singleProjectMode": true
-  }
-}
-```
-
 **Start Firebase emulators:**
 
 ```bash
+# First time start
+firebase emulators:start
+
+# In another terminal
+firebase emulators:export ./firebase-data
+
 # Persist the data between sessions:
 firebase emulators:start --import=./firebase-data --export-on-exit
 ```

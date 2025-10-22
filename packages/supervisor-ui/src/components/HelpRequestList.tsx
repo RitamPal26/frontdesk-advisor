@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import { db } from "@/lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import RequestItem from "./RequestItem"; // We import the component from Step 1
+import RequestItem from "./RequestItem"; 
 
 interface HelpRequest {
   id: string;
