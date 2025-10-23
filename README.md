@@ -1,4 +1,4 @@
-# AI CallDesk Advisor - Setup Guide
+# AI CallDesk Agent - Setup Guide
 
 Voice agent handling customer relationships end-to-end using LiveKit, Firebase, and Next.js
 
